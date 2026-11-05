@@ -1,0 +1,16 @@
+{
+  "name": "site-oksana",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "pnpm --filter @oksana/web dev",
+    "build": "pnpm --filter @oksana/web build",
+    "start": "pnpm --filter @oksana/web start",
+    "typecheck": "pnpm --filter @oksana/web typecheck",
+    "lint": "pnpm --filter @oksana/web lint",
+    "test": "pnpm --filter @oksana/web test",
+    "test:e2e": "pnpm --filter @oksana/web test:e2e",
+    "format": "pnpm --filter @oksana/web format",
+    "format:check": "pnpm --filter @oksana/web format:check"
+  }
+}
