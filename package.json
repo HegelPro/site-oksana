@@ -4,6 +4,9 @@
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "pnpm --filter @oksana/web dev",
+    "db:up": "docker compose --env-file apps/web/.env.development.local -f compose.dev.yaml up -d --wait postgres && pnpm db:migrate",
+    "db:migrate": "docker compose --env-file apps/web/.env.development.local -f compose.dev.yaml run --rm migrate",
+    "db:down": "docker compose --env-file apps/web/.env.development.local -f compose.dev.yaml down",
     "build": "pnpm --filter @oksana/web build",
     "start": "pnpm --filter @oksana/web start",
     "typecheck": "pnpm --filter @oksana/web typecheck",

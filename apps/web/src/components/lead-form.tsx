@@ -2,15 +2,22 @@
 
 import { Button } from "@/components/ui/button";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 
 type SubmitState = "idle" | "sending" | "success" | "error";
 
-export function LeadForm({ courseSlug, courseTitle }: { courseSlug: string; courseTitle: string }) {
+export function LeadForm({
+  courseSlug,
+  privacyVersion,
+}: {
+  courseSlug: string;
+  privacyVersion?: string;
+}) {
   const [state, setState] = useState<SubmitState>("idle");
   const [message, setMessage] = useState("");
+  const attempt = useRef<{ payload: string; id?: string } | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,6 +25,20 @@ export function LeadForm({ courseSlug, courseTitle }: { courseSlug: string; cour
 
     const form = event.currentTarget;
     const data = new FormData(form);
+    const lead = {
+      name: data.get("name"),
+      phone: data.get("phone"),
+      email: data.get("email"),
+      message: data.get("message"),
+      courseSlug,
+      privacyVersion,
+      consent: data.get("consent") === "on",
+      website: data.get("website"),
+    };
+    const payload = JSON.stringify(lead);
+    if (attempt.current?.payload !== payload) {
+      attempt.current = { payload, id: globalThis.crypto?.randomUUID?.() };
+    }
     setState("sending");
     setMessage("");
 
@@ -25,21 +46,15 @@ export function LeadForm({ courseSlug, courseTitle }: { courseSlug: string; cour
       const response = await fetch("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: data.get("name"),
-          phone: data.get("phone"),
-          email: data.get("email"),
-          courseSlug,
-          consent: data.get("consent") === "on",
-          website: data.get("website"),
-        }),
+        body: JSON.stringify({ ...lead, submissionId: attempt.current.id }),
       });
       const result: { ok?: boolean; error?: string } = await response.json();
       if (!response.ok || !result.ok)
         throw new Error(result.error ?? "Не удалось отправить заявку.");
       form.reset();
+      attempt.current = null;
       setState("success");
-      setMessage("Заявка отправлена. Мы свяжемся с вами по указанным контактам.");
+      setMessage("Заявка принята. Мы свяжемся с вами по указанным контактам.");
     } catch (error) {
       setState("error");
       setMessage(error instanceof Error ? error.message : "Не удалось отправить заявку.");
@@ -49,18 +64,10 @@ export function LeadForm({ courseSlug, courseTitle }: { courseSlug: string; cour
   return (
     <form
       data-testid="lead-form"
+      aria-labelledby="apply-title"
       className="rounded-lg border border-[#dfd5e2] bg-paper px-5 pt-[25px] pb-4 shadow-[0_20px_50px_#4b285d07] md:px-7.5 md:pt-8.5 md:pb-5"
       onSubmit={handleSubmit}
     >
-      <div
-        data-testid="form-header"
-        className="mb-[23px] flex flex-col items-start gap-[13px] border-b border-line pb-5.5"
-      >
-        <span className="text-xs-small font-bold tracking-[.12em] text-violet">ЗАЯВКА НА КУРС</span>
-        <strong className="max-w-full font-serif text-[26px] leading-[1.2] font-medium">
-          {courseTitle}
-        </strong>
-      </div>
       <div className="mb-[21px]">
         <label className="mb-[9px] block text-[13px] font-semibold" htmlFor="lead-name">
           Ваше имя
@@ -107,6 +114,19 @@ export function LeadForm({ courseSlug, courseTitle }: { courseSlug: string; cour
           maxLength={254}
           placeholder="name@example.com"
           required
+        />
+      </div>
+      <div className="mb-[21px]">
+        <label className="mb-[9px] block text-[13px] font-semibold" htmlFor="lead-message">
+          Сообщение <span className="font-normal text-muted">(необязательно)</span>
+        </label>
+        <textarea
+          className="min-h-26 w-full resize-y rounded border border-[#cbbfd0] bg-white px-3.5 py-3 text-base text-ink placeholder:text-[#8d8491]"
+          id="lead-message"
+          name="message"
+          maxLength={2000}
+          rows={3}
+          placeholder="Ваш вопрос о курсе"
         />
       </div>
       <div className="absolute -left-2500 h-[1px] w-[1px] overflow-hidden" aria-hidden="true">

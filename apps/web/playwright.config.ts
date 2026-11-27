@@ -21,7 +21,7 @@ export default defineConfig({
   timeout: 30_000,
   use: {
     ...devices["Desktop Chrome"],
-    channel: "chrome",
+    channel: process.env.CI ? undefined : "chrome",
     hasTouch: true,
     baseURL: externalBaseUrl ?? "http://127.0.0.1:3100",
     trace: "retain-on-failure",

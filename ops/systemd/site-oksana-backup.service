@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up the Oksana PostgreSQL database offsite
+OnFailure=site-oksana-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/site-oksana-release backup
+TimeoutStartSec=10min

@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { getCourse } from "@oksana/catalog";
+import { getCourse } from "./courses";
 import type { Lead } from "./lead";
 
 export class MailConfigurationError extends Error {}
@@ -32,7 +32,7 @@ function getMailConfig() {
   };
 }
 
-export async function sendLeadNotification(lead: Lead) {
+export async function sendLeadNotification(lead: Lead, id: string) {
   const config = getMailConfig();
   const course = getCourse(lead.courseSlug);
   if (!course) throw new Error("Unknown course");
@@ -42,6 +42,9 @@ export async function sendLeadNotification(lead: Lead) {
     port: config.port,
     secure: config.port === 465,
     requireTLS: config.port !== 465,
+    connectionTimeout: 5_000,
+    greetingTimeout: 5_000,
+    socketTimeout: 10_000,
     auth: { user: config.user, pass: config.password },
   });
 
@@ -53,10 +56,12 @@ export async function sendLeadNotification(lead: Lead) {
     text: [
       "Новая заявка с сайта Оксаны",
       "",
+      `ID заявки: ${id}`,
       `Курс: ${course.title} (${course.slug})`,
       `Имя: ${lead.name}`,
       `Телефон: ${lead.phone}`,
       `Email: ${lead.email}`,
+      ...(lead.message ? ["", "Сообщение", lead.message, ""] : []),
       `Согласие на обработку данных: да`,
       `Дата: ${new Date().toISOString()}`,
     ].join("\n"),

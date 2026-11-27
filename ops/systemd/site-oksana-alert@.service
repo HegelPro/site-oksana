@@ -1,0 +1,6 @@
+[Unit]
+Description=Notify the Oksana site operator about %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/site-oksana-notify %i

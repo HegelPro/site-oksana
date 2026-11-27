@@ -1,0 +1,129 @@
+name: Verify and release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    name: Project checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install and verify
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+          pnpm --filter @oksana/web exec playwright install --with-deps chromium
+      - name: Build release images
+        run: |
+          docker build --target runner --tag site-oksana-ci-web --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+          docker build --target migrations --tag site-oksana-ci-migrate --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+      - name: Verify a fresh PostgreSQL stack and course form
+        run: bash ops/ci-stack.sh
+      - name: Save the tested images
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: docker save site-oksana-ci-web site-oksana-ci-migrate | gzip > "$RUNNER_TEMP/release-images.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/release-images.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+  images:
+    name: Publish tested images to GHCR
+    needs: checks
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      web-digest: ${{ steps.publish.outputs.web-digest }}
+      migrate-digest: ${{ steps.publish.outputs.migrate-digest }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/site-release
+      - name: Push and capture immutable digests
+        id: publish
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker load -i "$RUNNER_TEMP/site-release/release-images.tar.gz"
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for service in web migrate; do
+            image="ghcr.io/${GITHUB_REPOSITORY,,}/$service:$GITHUB_SHA"
+            docker tag "site-oksana-ci-$service" "$image"
+            docker push "$image"
+            manifest=$(docker buildx imagetools inspect "$image")
+            digest=$(awk '$1 == "Digest:" { print $2; exit }' <<< "$manifest")
+            [[ $digest =~ ^sha256:[a-f0-9]{64}$ ]]
+            printf '%s-digest=%s\n' "$service" "$digest" >> "$GITHUB_OUTPUT"
+          done
+
+  deploy:
+    name: Deploy to production by SSH
+    needs: images
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    concurrency:
+      group: site-oksana-production
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      WEB_DIGEST: ${{ needs.images.outputs.web-digest }}
+      MIGRATE_DIGEST: ${{ needs.images.outputs.migrate-digest }}
+    steps:
+      - name: Deploy the current commit
+        run: |
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$current" != "$GITHUB_SHA" ]]; then
+            echo "A newer commit superseded this release."
+            exit 0
+          fi
+          [[ $DEPLOY_HOST =~ ^[A-Za-z0-9.:-]+$ && $DEPLOY_PORT =~ ^[0-9]{1,5}$ ]]
+          [[ $DEPLOY_USER =~ ^[a-z_][a-z0-9_-]+$ && -n $DEPLOY_SSH_KEY && -n $DEPLOY_KNOWN_HOSTS ]]
+          [[ $WEB_DIGEST =~ ^sha256:[a-f0-9]{64}$ && $MIGRATE_DIGEST =~ ^sha256:[a-f0-9]{64}$ ]]
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -f "$ssh_dir/key" "$ssh_dir/known_hosts"; rmdir "$ssh_dir"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh -i "$ssh_dir/key" -l "$DEPLOY_USER" -p "$DEPLOY_PORT" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=10 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            -- "$DEPLOY_HOST" deploy "$GITHUB_SHA" "$WEB_DIGEST" "$MIGRATE_DIGEST"

@@ -1,0 +1,4 @@
+db/*.sh text eol=lf
+db/migrations/*.sql text eol=lf
+ops/*.sh text eol=lf
+Caddyfile text eol=lf

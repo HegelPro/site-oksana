@@ -1,0 +1,8 @@
+[Unit]
+Description=Check Oksana site, disk and application notifications
+OnFailure=site-oksana-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/site-oksana-release check
+TimeoutStartSec=5min
