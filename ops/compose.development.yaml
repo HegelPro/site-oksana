@@ -1,0 +1,83 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    image: ${WEB_IMAGE:?Development WEB_IMAGE is required}
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: oksana_development
+      PGUSER: oksana_app
+      PGPASSWORD: ${DEV_APP_DB_PASSWORD:?Set DEV_APP_DB_PASSWORD}
+      SITE_ORIGIN: https://${DEV_SITE_ADDRESS:?Set DEV_SITE_ADDRESS}
+      PUBLIC_LEADS_ENABLED: "true"
+      PUBLIC_INDEXABLE: "false"
+      LEAD_EMAIL_ENABLED: "false"
+      PRIVACY_VERSION: development-test
+      PRIVACY_POLICY_PATH: /policy/policy.md
+    volumes:
+      - ./development-policy.md:/policy/policy.md:ro
+    networks:
+      database:
+      edge:
+        aliases: [dev-web]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    logging: *logging
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: oksana_development
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:?Set DEV_POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+
+  migrate:
+    image: ${MIGRATE_IMAGE:?Development MIGRATE_IMAGE is required}
+    mem_limit: 256m
+    cpus: 1
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: oksana_development
+      PGUSER: postgres
+      PGPASSWORD: ${DEV_POSTGRES_PASSWORD:?Set DEV_POSTGRES_PASSWORD}
+      PGCONNECT_TIMEOUT: 5
+      APP_DB_PASSWORD: ${DEV_APP_DB_PASSWORD:?Set DEV_APP_DB_PASSWORD}
+    networks: [database]
+    logging: *logging
+
+networks:
+  database:
+    internal: true
+  edge:
+    external: true
+    name: site-oksana-edge
+
+volumes:
+  postgres_data:

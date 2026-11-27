@@ -1,6 +1,13 @@
-# Production сайта Оксаны
+# Развёртывание сайта Оксаны
 
-GitHub Actions проверяет каждый PR и коммит в main. По завершении проверок на main публикуются точные образы сайта и миграций. При DEPLOY_ENABLED=true workflow подключается к VPS по SSH и передаёт коммит и дайджесты обоих образов. PostgreSQL, сайт и Caddy работают на одном VPS.
+GitHub Actions запускает проверки сайта, собирает образы сайта и миграций и проверяет их с PostgreSQL. Один Caddy обслуживает два HTTPS-домена на VPS. У каждого окружения свой Compose-проект, веб-контейнер, экземпляр PostgreSQL, том, учётные данные и SSH-ключ для релизов.
+
+| Ветка | Workflow | Пакеты GHCR | Переключатель SSH-деплоя |
+| --- | --- | --- | --- |
+| `develop` | Development | `site-oksana/dev-web`, `site-oksana/dev-migrate` | `DEV_DEPLOY_ENABLED` |
+| `main` | Verify and release | `site-oksana/web`, `site-oksana/migrate` | `DEPLOY_ENABLED` |
+
+Открывайте рабочие PR в `develop`. После проверки тестовой версии откройте релизный PR `develop → main` и дождитесь статуса `Project checks`. Сливайте релизный PR через `Create a merge commit`, чтобы сохранялась общая история долгоживущих веток. После слияния `main` запускает production-сборку.
 
 ## Подготовка VPS
 
@@ -29,10 +36,32 @@ GitHub Actions проверяет каждый PR и коммит в main. По 
 
 ## Настройки GitHub и первый релиз
 
-- В настройках main потребуйте PR и успешный статус Project checks. Для Environment production разрешите ветку main. Установите секрет DEPLOY_SSH_KEY. В переменных репозитория задайте DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER=site-deploy, DEPLOY_KNOWN_HOSTS и SITE_URL формата https://ваш-домен. Для DEPLOY_KNOWN_HOSTS сверяйте публичный ключ SSH-хоста через консоль VPS. Для нестандартного порта используйте запись [хост]:порт.
+- В настройках main потребуйте PR и успешный статус Project checks. Для Environment production разрешите ветку main. Установите секрет DEPLOY_SSH_KEY в этом Environment. Там же задайте переменные DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER=site-deploy и DEPLOY_KNOWN_HOSTS. Переменную SITE_URL формата https://ваш-домен задайте в настройках репозитория для мониторинга. Для DEPLOY_KNOWN_HOSTS сверяйте публичный ключ SSH-хоста через консоль VPS. Для нестандартного порта используйте запись [хост]:порт.
 - Пока VPS готовится, оставьте DEPLOY_ENABLED=false. Первый успешный запуск main публикует пакеты site-oksana/web и site-oksana/migrate. В настройках каждого пакета выберите Public для скачивания с VPS. До открытия пакетов проверьте, что артефакты и образ содержат только содержимое репозитория и публичные ресурсы.
 - Когда DNS, сервер и хранилище копий готовы, установите DEPLOY_ENABLED=true. Для первого запуска выполните Verify and release вручную на main. После этого новые коммиты main запускают релиз автоматически.
-- Caddy выпускает и продлевает сертификат Let’s Encrypt. Постоянные тома caddy_data и caddy_config сохраняют ключи и состояние Caddy при смене образа. Тома PostgreSQL и Caddy имеют префикс site-oksana. Используйте один Compose-проект для всех релизов.
+- Caddy выпускает и продлевает сертификат Let’s Encrypt. Постоянные тома caddy_data и caddy_config сохраняют ключи и состояние Caddy при смене образа. Тома production имеют префикс site-oksana. Compose-проект production называется site-oksana.
+
+## Development на том же VPS
+
+1. Добавьте DNS-запись для отдельного поддомена, например `dev.example.com`, на тот же IP. Дождитесь первого production-релиза. На уже настроенном VPS выполните `sudo bash ops/install.sh` из проверенной версии с конфигурацией обоих окружений.
+2. Заполните `/etc/site-oksana/development.env`. Укажите `DEV_SITE_ADDRESS` как имя dev-поддомена и задайте два отдельных случайных пароля в `DEV_POSTGRES_PASSWORD` и `DEV_APP_DB_PASSWORD`. Compose-проект `site-oksana-development` использует базу `oksana_development` и том `site-oksana-development_postgres_data`.
+3. Скопируйте `/etc/site-oksana/development.caddy.example` в рабочий файл, замените домен и логин при необходимости. Сгенерируйте bcrypt-хэш интерактивно через `sudo docker run --rm -it caddy:2-alpine caddy hash-password` и подставьте его вместо `REPLACE_WITH_BCRYPT_HASH`. Установите готовый файл как `/etc/site-oksana/caddy-sites/development.caddy` с правами 0644. Затем выполните `sudo site-oksana-release refresh`, чтобы применить маршрут и проверить работу production.
+4. Создайте на VPS отдельного пользователя `site-deploy-dev` без групп Docker и sudo. Используйте отдельную пару SSH-ключей. В `authorized_keys` укажите следующую команду.
+
+   ~~~text
+   restrict,command="/usr/local/sbin/site-oksana-ssh development" ssh-ed25519 <публичный-ключ-dev>
+   ~~~
+
+   Через `visudo` добавьте правило в `/etc/sudoers.d/site-oksana-development-deploy`.
+
+   ~~~sudoers
+   site-deploy-dev ALL=(root) NOPASSWD: /usr/local/sbin/site-oksana-development-release deploy *
+   ~~~
+
+5. В GitHub Environment `development` с доступом только из `develop` задайте переменные `DEV_DEPLOY_HOST`, `DEV_DEPLOY_PORT`, `DEV_DEPLOY_USER=site-deploy-dev`, `DEV_DEPLOY_KNOWN_HOSTS` и секрет `DEV_DEPLOY_SSH_KEY`. Хост и порт могут совпадать с production. Ключ хоста сверяйте через консоль VPS.
+6. После первой сборки выберите Public для пакетов `dev-web` и `dev-migrate` после проверки их содержимого. В настройках репозитория выставьте `DEV_DEPLOY_ENABLED=true`. Запустите `Development` на ветке `develop` или отправьте в неё коммит. Проверьте, что dev-страница просит пароль, а после входа открывается и принимает тестовую заявку.
+
+Храните в dev только вымышленные заявки. В dev отключены письма и индексация. Диск и ресурсы хоста общие, веб-сервис и база dev ограничены по памяти и CPU. Копии production делаются по отдельному расписанию. Релиз dev при сбое проверки возвращает предыдущий веб-образ, поэтому изменения схемы должны сохранять совместимость с ним.
 
 ## Открытие формы и индексации
 

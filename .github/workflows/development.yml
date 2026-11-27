@@ -1,0 +1,73 @@
+name: Development
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    name: Development checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/verify-and-build
+      - name: Save the tested images
+        if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+        run: docker save site-oksana-ci-web site-oksana-ci-migrate | gzip > "$RUNNER_TEMP/release-images.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/release-images.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+  images:
+    needs: checks
+    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    uses: ./.github/workflows/publish-images.yml
+    with:
+      package-prefix: dev-
+    permissions:
+      contents: read
+      packages: write
+
+  deploy:
+    name: Deploy development by SSH
+    needs: images
+    if: github.ref == 'refs/heads/develop' && vars.DEV_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: development
+    concurrency:
+      group: site-oksana-development
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Deploy the current commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_HOST: ${{ vars.DEV_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEV_DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEV_DEPLOY_USER }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEV_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEV_DEPLOY_SSH_KEY }}
+          WEB_DIGEST: ${{ needs.images.outputs.web-digest }}
+          MIGRATE_DIGEST: ${{ needs.images.outputs.migrate-digest }}
+        run: bash ops/deploy-ssh.sh develop

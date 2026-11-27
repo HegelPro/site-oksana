@@ -1,0 +1,27 @@
+name: Verify and build the site
+description: Run project checks, build the release images and verify them with PostgreSQL and Caddy.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 22
+    - name: Install and verify
+      shell: bash
+      run: |
+        corepack enable
+        corepack prepare pnpm@11.25.0 --activate
+        pnpm install --frozen-lockfile
+        pnpm typecheck
+        pnpm lint
+        pnpm test
+        pnpm --filter @oksana/web exec playwright install --with-deps chromium
+    - name: Build release images
+      shell: bash
+      run: |
+        docker build --target runner --tag site-oksana-ci-web --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+        docker build --target migrations --tag site-oksana-ci-migrate --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+    - name: Verify a fresh PostgreSQL stack and course form
+      shell: bash
+      run: bash ops/ci-stack.sh

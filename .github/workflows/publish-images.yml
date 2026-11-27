@@ -1,0 +1,49 @@
+name: Publish release images
+
+on:
+  workflow_call:
+    inputs:
+      package-prefix:
+        type: string
+        default: ''
+    outputs:
+      web-digest:
+        value: ${{ jobs.publish.outputs.web-digest }}
+      migrate-digest:
+        value: ${{ jobs.publish.outputs.migrate-digest }}
+
+jobs:
+  publish:
+    name: Publish tested images to GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      web-digest: ${{ steps.publish.outputs.web-digest }}
+      migrate-digest: ${{ steps.publish.outputs.migrate-digest }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/site-release
+      - name: Push and capture immutable digests
+        id: publish
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_PREFIX: ${{ inputs.package-prefix }}
+        run: |
+          [[ -z $PACKAGE_PREFIX || $PACKAGE_PREFIX == dev- ]]
+          docker load -i "$RUNNER_TEMP/site-release/release-images.tar.gz"
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for service in web migrate; do
+            image="ghcr.io/${GITHUB_REPOSITORY,,}/${PACKAGE_PREFIX}$service:$GITHUB_SHA"
+            docker tag "site-oksana-ci-$service" "$image"
+            docker push "$image"
+            manifest=$(docker buildx imagetools inspect "$image")
+            digest=$(awk '$1 == "Digest:" { print $2; exit }' <<< "$manifest")
+            [[ $digest =~ ^sha256:[a-f0-9]{64}$ ]]
+            printf '%s-digest=%s\n' "$service" "$digest" >> "$GITHUB_OUTPUT"
+          done
