@@ -12,3 +12,5 @@
     header_up X-Site-Client-IP {remote_host}
   }
 }
+
+import /etc/caddy/sites/*.caddy

@@ -12,3 +12,11 @@ services:
   caddy:
     ports: !override
       - "127.0.0.1:3100:80"
+    networks: [default, development_edge]
+    volumes:
+      - ${CI_DEV_SITE_FILE:?CI preview route required}:/etc/caddy/sites/development.caddy:ro
+
+networks:
+  development_edge:
+    external: true
+    name: site-oksana-edge

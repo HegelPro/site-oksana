@@ -27,8 +27,14 @@ services:
     logging: *logging
 
   caddy:
+    networks: [default, development_edge]
+    volumes:
+      - /etc/site-oksana/caddy-sites:/etc/caddy/sites:ro
     logging: *logging
 
 networks:
   database:
     internal: true
+  development_edge:
+    name: site-oksana-edge
+    external: true
