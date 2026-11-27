@@ -1,0 +1,34 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    build: !reset null
+    image: ${WEB_IMAGE:?Release WEB_IMAGE is required}
+    environment:
+      SITE_ORIGIN: https://${SITE_ADDRESS:?Set SITE_ADDRESS to the production domain}
+      PRIVACY_POLICY_PATH: /policy/policy.md
+    volumes:
+      - /etc/site-oksana/privacy:/policy:ro
+    networks: [default, database]
+    logging: *logging
+
+  postgres:
+    networks: [database]
+    logging: *logging
+
+  migrate:
+    image: ${MIGRATE_IMAGE:?Release MIGRATE_IMAGE is required}
+    volumes: !reset []
+    networks: [database]
+    logging: *logging
+
+  caddy:
+    logging: *logging
+
+networks:
+  database:
+    internal: true

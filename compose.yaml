@@ -2,15 +2,70 @@ services:
   web:
     build: .
     restart: unless-stopped
-    env_file: .env
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-oksana}
+      PGUSER: oksana_app
+      PGPASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}
+      LEAD_EMAIL_ENABLED: ${LEAD_EMAIL_ENABLED:-true}
+      SITE_ORIGIN: ${SITE_ORIGIN:-}
+      PUBLIC_LEADS_ENABLED: ${PUBLIC_LEADS_ENABLED:-false}
+      PUBLIC_INDEXABLE: ${PUBLIC_INDEXABLE:-false}
+      PRIVACY_VERSION: ${PRIVACY_VERSION:-}
+      PRIVACY_POLICY_PATH: ${PRIVACY_POLICY_PATH:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      LEAD_TO: ${LEAD_TO:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-oksana}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  migrate:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "/db/migrate.sh"]
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-oksana}
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PGCONNECT_TIMEOUT: 5
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}
+    volumes:
+      - ./db:/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   caddy:
     image: caddy:2-alpine
@@ -32,3 +87,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  postgres_data:

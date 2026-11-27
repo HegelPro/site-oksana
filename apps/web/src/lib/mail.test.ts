@@ -8,6 +8,7 @@ const lead = {
   name: "Анна",
   phone: "+7 999 123-45-67",
   email: "anna@example.com",
+  message: "Можно заниматься с нуля?",
   courseSlug: "course-01",
   consent: true as const,
   website: "",
@@ -46,7 +47,7 @@ describe("sendLeadNotification", () => {
     const sendMail = vi.fn().mockResolvedValue({});
     vi.mocked(nodemailer.createTransport).mockReturnValue({ sendMail } as never);
 
-    await sendLeadNotification(lead);
+    await sendLeadNotification(lead, "lead-1");
 
     expect(nodemailer.createTransport).toHaveBeenCalledWith(
       expect.objectContaining({ host: "smtp.example.com", secure: true }),
@@ -60,11 +61,15 @@ describe("sendLeadNotification", () => {
         text: expect.stringContaining("+7 999 123-45-67"),
       }),
     );
+    expect(sendMail.mock.calls[0][0].text).toContain("ID заявки: lead-1");
+    expect(sendMail.mock.calls[0][0].text).toContain(lead.message);
   });
 
   it("does not attempt delivery without SMTP configuration", async () => {
     delete process.env.SMTP_HOST;
-    await expect(sendLeadNotification(lead)).rejects.toBeInstanceOf(MailConfigurationError);
+    await expect(sendLeadNotification(lead, "lead-1")).rejects.toBeInstanceOf(
+      MailConfigurationError,
+    );
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
   });
 });

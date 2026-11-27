@@ -1,0 +1,17 @@
+name: oksana-dev
+
+services:
+  postgres:
+    extends:
+      file: compose.yaml
+      service: postgres
+    ports:
+      - "127.0.0.1:${PGPORT:-5433}:5432"
+
+  migrate:
+    extends:
+      file: compose.yaml
+      service: migrate
+
+volumes:
+  postgres_data:

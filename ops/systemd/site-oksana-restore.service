@@ -1,0 +1,8 @@
+[Unit]
+Description=Verify restoration of the Oksana PostgreSQL backup
+OnFailure=site-oksana-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/site-oksana-release restore-check
+TimeoutStartSec=10min

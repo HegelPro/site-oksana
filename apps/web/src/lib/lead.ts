@@ -1,5 +1,5 @@
-import { getCourse } from "@oksana/catalog";
 import { z } from "zod";
+import { getVisibleCourse } from "./courses";
 
 export const leadSchema = z.object({
   name: z
@@ -16,8 +16,19 @@ export const leadSchema = z.object({
     .regex(/^[+()\d\s-]+$/, "Проверьте номер телефона")
     .refine((value) => value.replace(/\D/g, "").length >= 7, "Проверьте номер телефона"),
   email: z.email("Проверьте адрес электронной почты").max(254),
-  courseSlug: z.string().refine((slug) => Boolean(getCourse(slug)), "Курс не найден"),
+  message: z
+    .string()
+    .trim()
+    .max(2000)
+    .refine((value) => !value.includes("\u0000"))
+    .optional(),
+  courseSlug: z.string().refine((slug) => Boolean(getVisibleCourse(slug)), "Курс не найден"),
   consent: z.literal(true, { error: "Необходимо согласие" }),
+  privacyVersion: z
+    .string()
+    .regex(/^[a-zA-Z0-9._-]{1,64}$/)
+    .optional(),
+  submissionId: z.uuidv4().optional(),
   website: z.string().max(200).optional().default(""),
 });
 
